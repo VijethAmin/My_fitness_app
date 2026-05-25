@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+backend/data/
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+
+# Logs and local env
+*.log
+*.local
+.env
+.env.*
+!.env.example
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
