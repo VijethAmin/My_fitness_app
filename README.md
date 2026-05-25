@@ -1,5 +1,7 @@
 # AI Fitness Coach
 
+https://my-fitness-app-git-main-vijethamins-projects.vercel.app/
+
 AI Fitness Coach is a full-stack fitness planning app with a React frontend and FastAPI backend. Users can log in, enter their body metrics and preferences, then generate a practical workout, nutrition, BMI, protein, calorie, and water-intake plan. Admins can review users and customize an individual user's workout plan, meal plan, and coach notes.
 
 ## Features
