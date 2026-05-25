@@ -33,7 +33,7 @@ Diet = Literal["Vegetarian", "Non-Vegetarian"]
 WorkoutPlace = Literal["Gym", "Home"]
 Role = Literal["admin", "user"]
 
-DATA_FILE = Path(
+DEFAULT_DATA_FILE = Path(
     os.getenv(
         "DATA_FILE",
         "/tmp/ai-fitness-store.json"
@@ -41,6 +41,7 @@ DATA_FILE = Path(
         else str(Path(__file__).resolve().parent / "data" / "store.json"),
     )
 )
+FALLBACK_DATA_FILE = Path("/tmp/ai-fitness-store.json")
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@fitness.local").lower()
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 
@@ -280,17 +281,24 @@ def get_empty_store() -> dict[str, object]:
 
 
 def load_store() -> dict[str, object]:
-    if not DATA_FILE.exists():
+    data_file = DEFAULT_DATA_FILE if DEFAULT_DATA_FILE.exists() else FALLBACK_DATA_FILE
+
+    if not data_file.exists():
         return get_empty_store()
 
-    with DATA_FILE.open("r", encoding="utf-8") as store_file:
+    with data_file.open("r", encoding="utf-8") as store_file:
         return json.load(store_file)
 
 
 def save_store(store: dict[str, object]) -> None:
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with DATA_FILE.open("w", encoding="utf-8") as store_file:
-        json.dump(store, store_file, indent=2)
+    try:
+        DEFAULT_DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with DEFAULT_DATA_FILE.open("w", encoding="utf-8") as store_file:
+            json.dump(store, store_file, indent=2)
+    except OSError:
+        FALLBACK_DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with FALLBACK_DATA_FILE.open("w", encoding="utf-8") as store_file:
+            json.dump(store, store_file, indent=2)
 
 
 def hash_password(password: str, salt: str | None = None) -> str:
