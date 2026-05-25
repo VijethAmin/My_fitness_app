@@ -103,7 +103,7 @@ ADMIN_EMAIL=your-admin@example.com
 ADMIN_PASSWORD=your-strong-password
 ```
 
-This project uses a lightweight JSON datastore for demo and coursework use. For production, replace it with a real database and authentication system such as PostgreSQL plus JWT, Supabase Auth, Clerk, Auth.js, or Firebase Auth.
+This project uses a lightweight JSON datastore for demo and coursework use. Locally it writes to `backend/data/store.json`; on Vercel it writes to `/tmp/ai-fitness-store.json` so serverless functions can create users during a demo. Vercel `/tmp` storage is temporary, so replace it with a real database for permanent production data.
 
 ## API
 

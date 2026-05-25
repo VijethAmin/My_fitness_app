@@ -33,7 +33,14 @@ Diet = Literal["Vegetarian", "Non-Vegetarian"]
 WorkoutPlace = Literal["Gym", "Home"]
 Role = Literal["admin", "user"]
 
-DATA_FILE = Path(__file__).resolve().parent / "data" / "store.json"
+DATA_FILE = Path(
+    os.getenv(
+        "DATA_FILE",
+        "/tmp/ai-fitness-store.json"
+        if os.getenv("VERCEL")
+        else str(Path(__file__).resolve().parent / "data" / "store.json"),
+    )
+)
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@fitness.local").lower()
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 

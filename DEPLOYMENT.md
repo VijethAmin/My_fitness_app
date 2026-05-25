@@ -24,7 +24,7 @@ ADMIN_EMAIL=your-admin@example.com
 ADMIN_PASSWORD=your-strong-password
 ```
 
-The included JSON datastore is useful for local/demo use. Serverless deployments can reset filesystem data, so use a real hosted database if you need permanent user and plan storage in production.
+The included JSON datastore is useful for local/demo use. On Vercel it writes to `/tmp/ai-fitness-store.json`, which allows user login to work but can reset between serverless instances or deployments. Use a real hosted database if you need permanent user and plan storage in production.
 
 ## Netlify
 
