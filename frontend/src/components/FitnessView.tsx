@@ -10,6 +10,7 @@ type Props = {
 type Goal = 'Muscle Gain' | 'Fat Loss' | 'Maintenance'
 type Diet = 'Vegetarian' | 'Non-Vegetarian'
 type WorkoutPlace = 'Gym' | 'Home'
+type Gender = 'Male' | 'Female'
 
 type FitnessPlan = {
   BMI: number
@@ -33,6 +34,7 @@ const API_URL =
 
 function FitnessView({ user, onBack, onLogout }: Props) {
   const [age, setAge] = useState('')
+  const [gender, setGender] = useState<Gender>('Male')
   const [weight, setWeight] = useState('')
   const [height, setHeight] = useState('')
   const [goal, setGoal] = useState<Goal>('Muscle Gain')
@@ -78,6 +80,7 @@ function FitnessView({ user, onBack, onLogout }: Props) {
         },
         body: JSON.stringify({
           user_id: user.id,
+          gender,
           age: Number(age),
           weight: Number(weight),
           height: Number(height),
@@ -138,6 +141,14 @@ function FitnessView({ user, onBack, onLogout }: Props) {
                 onChange={(event) => setAge(event.target.value)}
                 placeholder="24"
               />
+            </label>
+
+            <label>
+              Gender
+              <select value={gender} onChange={(event) => setGender(event.target.value as Gender)}>
+                <option>Male</option>
+                <option>Female</option>
+              </select>
             </label>
 
             <label>

@@ -8,9 +8,10 @@ AI Fitness Coach is a full-stack fitness planning app with a React frontend and 
 - Backend-saved user accounts with login timestamps and latest plan details
 - Admin dashboard for selecting users and editing user-specific plans
 - BMI calculation and BMI category
-- Daily calorie, protein, and water targets
+- Gender-aware calorie, protein, and water targets
 - Goal-based workout plans for muscle gain, fat loss, and maintenance
-- Gym and home workout options
+- Strict gym-only and home-only workout plans
+- BMI, age, gender, goal, diet, and workout-place based plan adjustments
 - Exercise names for each workout day, such as Push-ups, Chest Press, Bench Press, Squat, Lat Pulldown, and Burpees
 - Vegetarian and non-vegetarian meal suggestions
 - Responsive frontend design
@@ -124,6 +125,7 @@ Example request:
 ```json
 {
   "age": 28,
+  "gender": "Male",
   "weight": 72,
   "height": 176,
   "goal": "Muscle Gain",
