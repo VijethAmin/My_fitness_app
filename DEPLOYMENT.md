@@ -25,6 +25,9 @@ ADMIN_PASSWORD=your-strong-password
 DATABASE_URL=mysql+pymysql://user:password@host:3306/ai_fitness_coach
 ```
 
+If `DATABASE_URL` is not set or the database is unreachable, the backend now falls back to a temporary local SQLite file at `backend/ai_fitness.db`.
+This is useful for quick Vercel testing, but the SQLite file is ephemeral on Vercel and not a production database.
+
 Use a hosted MySQL database for `DATABASE_URL`. SQLAlchemy creates the app tables automatically on the first API request.
 
 ## Netlify

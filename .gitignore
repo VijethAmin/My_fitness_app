@@ -16,6 +16,9 @@ dist-ssr/
 .env.*
 !.env.example
 
+# Local SQLite fallback
+backend/ai_fitness.db
+
 # Editors
 .vscode/*
 !.vscode/extensions.json

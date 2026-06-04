@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
@@ -6,13 +7,45 @@ from typing import Any
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
+logger = logging.getLogger(__name__)
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "mysql+pymysql://root:8520@127.0.0.1:3306/ai_fitness_coach",
-)
+DEFAULT_SQLITE_PATH = os.path.join(os.path.dirname(__file__), "ai_fitness.db")
+DEFAULT_SQLITE_URL = f"sqlite:///{DEFAULT_SQLITE_PATH}"
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+
+
+def _get_connect_args(url: str) -> dict[str, object]:
+    if url.startswith("sqlite:"):
+        return {"check_same_thread": False}
+    return {}
+
+
+def _create_engine(url: str):
+    return create_engine(url, pool_pre_ping=True, connect_args=_get_connect_args(url))
+
+
+def _build_engine() -> tuple[object, str]:
+    if not DATABASE_URL:
+        logger.warning("DATABASE_URL not set; falling back to temporary SQLite backend.")
+        return _create_engine(DEFAULT_SQLITE_URL), DEFAULT_SQLITE_URL
+
+    try:
+        engine = _create_engine(DATABASE_URL)
+        if not DATABASE_URL.startswith("sqlite:"):
+            with engine.connect() as conn:
+                pass
+        return engine, DATABASE_URL
+    except Exception as exc:
+        logger.warning(
+            "Failed to initialize database engine with DATABASE_URL=%s; falling back to SQLite: %s",
+            DATABASE_URL,
+            exc,
+        )
+        return _create_engine(DEFAULT_SQLITE_URL), DEFAULT_SQLITE_URL
+
+
+engine, ACTIVE_DATABASE_URL = _build_engine()
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
