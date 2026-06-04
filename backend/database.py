@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import tempfile
 from datetime import datetime, timezone
 from typing import Any
 
@@ -10,7 +11,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 logger = logging.getLogger(__name__)
 
 DEFAULT_SQLITE_PATH = os.path.join(os.path.dirname(__file__), "ai_fitness.db")
-DEFAULT_SQLITE_URL = f"sqlite:///{DEFAULT_SQLITE_PATH}"
+FALLBACK_SQLITE_PATH = os.path.join(tempfile.gettempdir(), "ai_fitness.db")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
@@ -25,10 +26,37 @@ def _create_engine(url: str):
     return create_engine(url, pool_pre_ping=True, connect_args=_get_connect_args(url))
 
 
+def _is_path_writable(path: str) -> bool:
+    directory = os.path.dirname(path) or "."
+    try:
+        os.makedirs(directory, exist_ok=True)
+        test_file = os.path.join(directory, ".tmp_write_test")
+        with open(test_file, "w") as f:
+            f.write("test")
+        os.remove(test_file)
+        return True
+    except OSError:
+        return False
+
+
+def _sqlite_engine() -> tuple[object, str]:
+    candidate = DEFAULT_SQLITE_PATH
+    if not _is_path_writable(candidate):
+        logger.warning(
+            "Default SQLite path is not writable (%s); falling back to temp path %s.",
+            candidate,
+            FALLBACK_SQLITE_PATH,
+        )
+        candidate = FALLBACK_SQLITE_PATH
+
+    url = f"sqlite:///{candidate}"
+    return _create_engine(url), url
+
+
 def _build_engine() -> tuple[object, str]:
     if not DATABASE_URL:
         logger.warning("DATABASE_URL not set; falling back to temporary SQLite backend.")
-        return _create_engine(DEFAULT_SQLITE_URL), DEFAULT_SQLITE_URL
+        return _sqlite_engine()
 
     try:
         engine = _create_engine(DATABASE_URL)
@@ -42,7 +70,7 @@ def _build_engine() -> tuple[object, str]:
             DATABASE_URL,
             exc,
         )
-        return _create_engine(DEFAULT_SQLITE_URL), DEFAULT_SQLITE_URL
+        return _sqlite_engine()
 
 
 engine, ACTIVE_DATABASE_URL = _build_engine()
