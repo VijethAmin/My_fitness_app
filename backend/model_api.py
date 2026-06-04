@@ -1,16 +1,31 @@
 import copy
 import hashlib
-import json
 import os
 import secrets
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Literal, TypedDict
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
+if __package__:
+    from backend.database import (
+        get_workout_completions,
+        load_store,
+        reset_workout_completions,
+        save_store,
+        set_workout_completion,
+    )
+else:
+    from database import (
+        get_workout_completions,
+        load_store,
+        reset_workout_completions,
+        save_store,
+        set_workout_completion,
+    )
 
 
 app = FastAPI(title="AI Fitness Coach API")
@@ -34,15 +49,6 @@ WorkoutPlace = Literal["Gym", "Home"]
 Role = Literal["admin", "user"]
 Gender = Literal["Male", "Female"]
 
-DEFAULT_DATA_FILE = Path(
-    os.getenv(
-        "DATA_FILE",
-        "/tmp/ai-fitness-store.json"
-        if os.getenv("VERCEL")
-        else str(Path(__file__).resolve().parent / "data" / "store.json"),
-    )
-)
-FALLBACK_DATA_FILE = Path("/tmp/ai-fitness-store.json")
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@fitness.local").lower()
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 
@@ -65,6 +71,12 @@ class LoginInput(BaseModel):
     password: str = Field(..., min_length=6, max_length=120)
 
 
+class SignupInput(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+    email: str = Field(..., min_length=5, max_length=120)
+    password: str = Field(..., min_length=6, max_length=120)
+
+
 class WorkoutDayModel(BaseModel):
     focus: str
     exercises: list[str]
@@ -74,6 +86,11 @@ class AdminPlanUpdate(BaseModel):
     workout_plan: dict[str, WorkoutDayModel]
     meal_plan: dict[str, str]
     notes: list[str]
+
+
+class WorkoutCompletionInput(BaseModel):
+    day: str = Field(..., min_length=3, max_length=20)
+    completed: bool
 
 
 class WorkoutDay(TypedDict):
@@ -199,31 +216,6 @@ DEFAULT_NOTES = [
 
 def get_now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def get_empty_store() -> dict[str, object]:
-    return {"users": []}
-
-
-def load_store() -> dict[str, object]:
-    data_file = DEFAULT_DATA_FILE if DEFAULT_DATA_FILE.exists() else FALLBACK_DATA_FILE
-
-    if not data_file.exists():
-        return get_empty_store()
-
-    with data_file.open("r", encoding="utf-8") as store_file:
-        return json.load(store_file)
-
-
-def save_store(store: dict[str, object]) -> None:
-    try:
-        DEFAULT_DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with DEFAULT_DATA_FILE.open("w", encoding="utf-8") as store_file:
-            json.dump(store, store_file, indent=2)
-    except OSError:
-        FALLBACK_DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with FALLBACK_DATA_FILE.open("w", encoding="utf-8") as store_file:
-            json.dump(store, store_file, indent=2)
 
 
 def hash_password(password: str, salt: str | None = None) -> str:
@@ -450,25 +442,40 @@ def login(credentials: LoginInput) -> dict[str, object]:
     user = find_user_by_email(users, email)
     now = get_now()
 
-    if user:
-        if not verify_password(credentials.password, str(user.get("password_hash", ""))):
-            raise HTTPException(status_code=401, detail="Invalid user credentials")
-        user["name"] = credentials.name.strip() or user["name"]
-        user["last_login"] = now
-    else:
-        user = {
-            "id": str(uuid.uuid4()),
-            "name": credentials.name.strip() or email.split("@")[0],
-            "email": email,
-            "password_hash": hash_password(credentials.password),
-            "created_at": now,
-            "last_login": now,
-            "profile": None,
-            "latest_plan": None,
-            "custom_plan": None,
-        }
-        users.append(user)
+    if not user or not verify_password(credentials.password, str(user.get("password_hash", ""))):
+        raise HTTPException(status_code=401, detail="Invalid user credentials")
 
+    user["last_login"] = now
+    save_store(store)
+    return public_user(user)
+
+
+@app.post("/signup")
+@app.post("/api/signup")
+def signup(credentials: SignupInput) -> dict[str, object]:
+    email = credentials.email.lower().strip()
+    name = credentials.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+
+    store = load_store()
+    users = get_users(store)
+    if find_user_by_email(users, email):
+        raise HTTPException(status_code=409, detail="An account with this email already exists")
+
+    now = get_now()
+    user = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "email": email,
+        "password_hash": hash_password(credentials.password),
+        "created_at": now,
+        "last_login": now,
+        "profile": None,
+        "latest_plan": None,
+        "custom_plan": None,
+    }
+    users.append(user)
     save_store(store)
     return public_user(user)
 
@@ -505,7 +512,7 @@ def generate_plan(user: FitnessInput) -> dict[str, object]:
     }
 
     if stored_user:
-        stored_user["profile"] = {
+        profile = {
             "age": user.age,
             "gender": user.gender,
             "weight": user.weight,
@@ -513,6 +520,15 @@ def generate_plan(user: FitnessInput) -> dict[str, object]:
             "goal": user.goal,
             "diet": user.diet,
             "workout_place": user.workout_place,
+        }
+        previous_profile = stored_user.get("profile")
+        if isinstance(previous_profile, dict) and any(
+            previous_profile.get(key) != value for key, value in profile.items()
+        ):
+            reset_workout_completions(str(stored_user["id"]))
+
+        stored_user["profile"] = {
+            **profile,
             "updated_at": get_now(),
         }
         stored_user["latest_plan"] = plan
@@ -574,3 +590,85 @@ def update_user_plan(
 
     save_store(store)
     return public_user(user)
+
+
+@app.get("/users/{user_id}/progress")
+@app.get("/api/users/{user_id}/progress")
+def get_user_progress(user_id: str) -> dict[str, object]:
+    store = load_store()
+    user = find_user_by_id(get_users(store), user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    workout_plan = user.get("latest_plan")
+    days = workout_plan.get("Workout Plan", {}) if isinstance(workout_plan, dict) else {}
+    completions = {
+        day: completed
+        for day, completed in get_workout_completions(user_id).items()
+        if day in days
+    }
+    completed_count = sum(1 for completed in completions.values() if completed)
+    return {
+        "user": public_user(user),
+        "completions": completions,
+        "completed_workouts": completed_count,
+        "total_workouts": len(days),
+        "completion_rate": round(completed_count / len(days) * 100) if days else 0,
+    }
+
+
+@app.put("/users/{user_id}/progress")
+@app.put("/api/users/{user_id}/progress")
+def update_user_progress(user_id: str, update: WorkoutCompletionInput) -> dict[str, object]:
+    store = load_store()
+    user = find_user_by_id(get_users(store), user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    workout_plan = user.get("latest_plan")
+    days = workout_plan.get("Workout Plan", {}) if isinstance(workout_plan, dict) else {}
+    if update.day not in days:
+        raise HTTPException(status_code=400, detail="Workout day is not in the user's current plan")
+
+    completions = {
+        day: completed
+        for day, completed in set_workout_completion(user_id, update.day, update.completed).items()
+        if day in days
+    }
+    completed_count = sum(1 for completed in completions.values() if completed)
+    return {
+        "completions": completions,
+        "completed_workouts": completed_count,
+        "total_workouts": len(days),
+        "completion_rate": round(completed_count / len(days) * 100) if days else 0,
+    }
+
+
+@app.get("/admin/analytics")
+@app.get("/api/admin/analytics")
+def get_admin_analytics(x_session_role: str | None = Header(default=None)) -> dict[str, object]:
+    require_admin(x_session_role)
+    users = get_users(load_store())
+    profiles = [user["profile"] for user in users if isinstance(user.get("profile"), dict)]
+    bmis = [
+        float(profile["weight"]) / ((float(profile["height"]) / 100) ** 2)
+        for profile in profiles
+        if profile.get("weight") and profile.get("height")
+    ]
+
+    def count_by(field: str) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for profile in profiles:
+            value = str(profile.get(field, "Unknown"))
+            counts[value] = counts.get(value, 0) + 1
+        return counts
+
+    return {
+        "total_users": len(users),
+        "users_with_profiles": len(profiles),
+        "average_bmi": round(sum(bmis) / len(bmis), 2) if bmis else 0,
+        "goal_distribution": count_by("goal"),
+        "gender_distribution": count_by("gender"),
+        "workout_preference": count_by("workout_place"),
+        "diet_preference": count_by("diet"),
+    }

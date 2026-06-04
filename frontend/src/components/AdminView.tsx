@@ -29,6 +29,16 @@ type Props = {
   onLogout: () => void
 }
 
+type Analytics = {
+  total_users: number
+  users_with_profiles: number
+  average_bmi: number
+  goal_distribution: Record<string, number>
+  gender_distribution: Record<string, number>
+  workout_preference: Record<string, number>
+  diet_preference: Record<string, number>
+}
+
 const API_URL =
   import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://127.0.0.1:8000' : '/api')
 
@@ -37,6 +47,61 @@ const EMPTY_WORKOUT_PLAN: WorkoutPlan = {
     focus: 'Custom workout',
     exercises: ['Push-ups', 'Squats', 'Plank'],
   },
+}
+
+const CHART_COLORS = ['#5138ee', '#00a878', '#7c6cff', '#f59e0b', '#8ba0c3']
+
+function AnalyticsChart({
+  title,
+  data,
+  type = 'bar',
+}: {
+  title: string
+  data: Record<string, number>
+  type?: 'bar' | 'pie'
+}) {
+  const entries = Object.entries(data)
+  const total = entries.reduce((sum, [, value]) => sum + value, 0)
+  const max = Math.max(...entries.map(([, value]) => value), 1)
+  let offset = 0
+  const pieBackground = `conic-gradient(${entries
+    .map(([, value], index) => {
+      const start = offset
+      offset += total ? (value / total) * 100 : 0
+      return `${CHART_COLORS[index % CHART_COLORS.length]} ${start}% ${offset}%`
+    })
+    .join(', ')})`
+
+  return (
+    <article className="chart-card">
+      <h3>{title}</h3>
+      {entries.length === 0 ? (
+        <p className="chart-empty">No profile data yet.</p>
+      ) : type === 'pie' ? (
+        <div className="pie-chart-wrap">
+          <div className="pie-chart" style={{ background: pieBackground }} aria-label={title} />
+          <div className="chart-legend">
+            {entries.map(([label, value], index) => (
+              <span key={label}>
+                <i style={{ background: CHART_COLORS[index % CHART_COLORS.length] }} />
+                {label}: {value}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="bar-chart">
+          {entries.map(([label, value]) => (
+            <div className="bar-row" key={label}>
+              <span>{label}</span>
+              <div><i style={{ width: `${(value / max) * 100}%` }} /></div>
+              <strong>{value}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+    </article>
+  )
 }
 
 function AdminView({ user, onLogout }: Props) {
@@ -48,6 +113,7 @@ function AdminView({ user, onLogout }: Props) {
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const [analytics, setAnalytics] = useState<Analytics | null>(null)
 
   const selectedUser = useMemo(
     () => users.find((managedUser) => managedUser.id === selectedUserId) ?? null,
@@ -80,9 +146,23 @@ function AdminView({ user, onLogout }: Props) {
     }
   }, [selectedUserId, user.role])
 
+  const loadAnalytics = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/admin/analytics`, {
+        headers: { 'X-Session-Role': user.role },
+      })
+      if (!response.ok) throw new Error('Could not load analytics')
+      setAnalytics((await response.json()) as Analytics)
+    } catch (loadError) {
+      console.error(loadError)
+      setError('Could not load analytics from the backend.')
+    }
+  }, [user.role])
+
   useEffect(() => {
     void loadUsers()
-  }, [loadUsers])
+    void loadAnalytics()
+  }, [loadAnalytics, loadUsers])
 
   useEffect(() => {
     if (!selectedUser) {
@@ -174,6 +254,26 @@ function AdminView({ user, onLogout }: Props) {
           </button>
         </div>
       </header>
+
+      {analytics ? (
+        <section className="analytics-shell">
+          <div className="section-heading">
+            <p className="eyebrow">Data analytics dashboard</p>
+            <h2>User Insights</h2>
+          </div>
+          <div className="analytics-metrics">
+            <article><span>Total users</span><strong>{analytics.total_users}</strong></article>
+            <article><span>Profiles analyzed</span><strong>{analytics.users_with_profiles}</strong></article>
+            <article><span>Average BMI</span><strong>{analytics.average_bmi || 'N/A'}</strong></article>
+          </div>
+          <div className="charts-grid">
+            <AnalyticsChart title="Goal Distribution" data={analytics.goal_distribution} type="pie" />
+            <AnalyticsChart title="Gender-wise Analysis" data={analytics.gender_distribution} type="pie" />
+            <AnalyticsChart title="Workout Preference" data={analytics.workout_preference} />
+            <AnalyticsChart title="Diet Preference" data={analytics.diet_preference} />
+          </div>
+        </section>
+      ) : null}
 
       <section className="admin-grid">
         <aside className="planner-panel">

@@ -13,6 +13,7 @@ type Props = {
 
 function LoginView({ onLogin }: Props) {
   const [role, setRole] = useState<UserSession['role']>('user')
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -23,8 +24,8 @@ function LoginView({ onLogin }: Props) {
     const trimmedName = name.trim()
     const trimmedEmail = email.trim().toLowerCase()
 
-    if (role === 'user' && !trimmedName) {
-      setError('Enter your name for user login.')
+    if (role === 'user' && authMode === 'signup' && !trimmedName) {
+      setError('Enter your name to create an account.')
       return
     }
 
@@ -47,21 +48,22 @@ function LoginView({ onLogin }: Props) {
     setIsLoading(true)
 
     try {
-      const response = await fetch(`${API_URL}/login`, {
+      const response = await fetch(`${API_URL}/${role === 'user' && authMode === 'signup' ? 'signup' : 'login'}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          role,
-          name: role === 'admin' ? 'Admin' : trimmedName,
+          ...(role === 'admin' || authMode === 'login' ? { role } : {}),
+          ...(role === 'admin' ? { name: 'Admin' } : authMode === 'signup' ? { name: trimmedName } : {}),
           email: trimmedEmail,
           password,
         }),
       })
 
       if (!response.ok) {
-        throw new Error('Login failed')
+        const responseBody = (await response.json().catch(() => null)) as { detail?: string } | null
+        throw new Error(responseBody?.detail ?? 'Request failed')
       }
 
       const session = (await response.json()) as UserSession
@@ -71,7 +73,9 @@ function LoginView({ onLogin }: Props) {
       setError(
         role === 'admin'
           ? 'Admin login failed. Default admin is admin@fitness.local / admin123.'
-          : 'User login failed. Check your password or create a new user with a new email.',
+          : loginError instanceof Error
+            ? loginError.message
+            : 'Could not complete your request. Try again.',
       )
     } finally {
       setIsLoading(false)
@@ -81,10 +85,11 @@ function LoginView({ onLogin }: Props) {
   return (
     <main className="login-screen">
       <section className="login-panel" aria-labelledby="login-title">
+        <span className="login-icon">+</span>
         <div className="section-heading">
-          <p className="eyebrow">Welcome back</p>
-          <h1 id="login-title">Login to AI Fitness Coach</h1>
-          <p>Choose user login for fitness plans or admin login to manage users.</p>
+          <p className="eyebrow">{authMode === 'signup' ? 'Create your account' : 'Welcome back'}</p>
+          <h1 id="login-title">{authMode === 'signup' ? 'Sign Up' : 'Login'} to AI Fitness Coach</h1>
+          <p>Log in to your account or sign up to start building fitness plans.</p>
         </div>
 
         <form className="field-grid" onSubmit={(event) => event.preventDefault()}>
@@ -99,22 +104,26 @@ function LoginView({ onLogin }: Props) {
             <button
               type="button"
               className={role === 'admin' ? 'active' : ''}
-              onClick={() => setRole('admin')}
+              onClick={() => {
+                setRole('admin')
+                setAuthMode('login')
+              }}
             >
               Admin
             </button>
           </div>
 
-          <label>
-            Name
-            <input
-              autoComplete="name"
-              disabled={role === 'admin'}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder={role === 'admin' ? 'Admin account' : 'Your name'}
-            />
-          </label>
+          {role === 'user' && authMode === 'signup' ? (
+            <label>
+              Name
+              <input
+                autoComplete="name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Your name"
+              />
+            </label>
+          ) : null}
 
           <label>
             Email
@@ -130,7 +139,7 @@ function LoginView({ onLogin }: Props) {
           <label>
             Password
             <input
-              autoComplete="current-password"
+              autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -146,8 +155,25 @@ function LoginView({ onLogin }: Props) {
             disabled={isLoading}
             onClick={handleSubmit}
           >
-            {isLoading ? 'Signing in...' : role === 'admin' ? 'Admin Login' : 'User Login'}
+            {isLoading
+              ? authMode === 'signup' ? 'Creating account...' : 'Signing in...'
+              : role === 'admin' ? 'Admin Login  ->' : authMode === 'signup' ? 'Create Account  ->' : 'Log In to Dashboard  ->'}
           </button>
+
+          {role === 'user' ? (
+            <p className="auth-switch">
+              {authMode === 'login' ? "Don't have an account?" : 'Already have an account?'}
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode(authMode === 'login' ? 'signup' : 'login')
+                  setError('')
+                }}
+              >
+                {authMode === 'login' ? 'Sign up' : 'Login'}
+              </button>
+            </p>
+          ) : null}
         </form>
       </section>
     </main>

@@ -3,38 +3,40 @@ import type { UserSession } from './LoginView'
 type Props = {
   user: UserSession
   onStart: () => void
+  onDashboard: () => void
   onLogout: () => void
 }
 
-function HomeView({ user, onStart, onLogout }: Props) {
+function HomeView({ user, onStart, onDashboard, onLogout }: Props) {
   return (
     <main className="home-screen">
-      <div className="session-bar session-bar-home">
-        <span>Signed in as {user.name}</span>
-        <button type="button" className="ghost-button light-button" onClick={onLogout}>
-          Logout
-        </button>
-      </div>
+      <header className="top-bar home-top-bar">
+        <div>
+          <p className="eyebrow">AI Fitness Coach</p>
+          <h1>Welcome back</h1>
+        </div>
+        <div className="session-bar">
+          <span>{user.name}</span>
+          <button type="button" className="ghost-button" onClick={onLogout}>
+            Logout
+          </button>
+        </div>
+      </header>
 
       <section className="home-content" aria-labelledby="home-title">
-        <p className="eyebrow">Smart training and nutrition planner</p>
-        <h1 id="home-title">AI Fitness Coach</h1>
+        <h2 id="home-title">Build your fitness plan</h2>
         <p className="home-copy">
-          Build a simple weekly workout plan with calorie, protein, water, BMI,
-          and meal guidance based on your body metrics and preferences.
+          Create a weekly workout, meal, BMI, calorie, protein, and water plan from
+          your body metrics and preferences.
         </p>
 
         <div className="home-actions">
           <button type="button" className="primary-button" onClick={onStart}>
             Get Started
           </button>
-        </div>
-
-        <div className="feature-grid" aria-label="Coach features">
-          <span>BMI analysis</span>
-          <span>Workout schedule</span>
-          <span>Meal ideas</span>
-          <span>Daily targets</span>
+          <button type="button" className="ghost-button" onClick={onDashboard}>
+            View Progress
+          </button>
         </div>
       </section>
     </main>

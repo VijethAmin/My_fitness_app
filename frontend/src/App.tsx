@@ -3,6 +3,7 @@ import HomeView from './components/HomeView'
 import FitnessView from './components/FitnessView'
 import LoginView, { type UserSession } from './components/LoginView'
 import AdminView from './components/AdminView'
+import DashboardView from './components/DashboardView'
 
 const SESSION_KEY = 'ai-fitness-coach-session'
 
@@ -22,17 +23,20 @@ function getStoredSession(): UserSession | null {
 }
 
 function App() {
-  const [showFitness, setShowFitness] = useState(false)
   const [user, setUser] = useState<UserSession | null>(() => getStoredSession())
+  const [view, setView] = useState<'home' | 'fitness' | 'dashboard'>(() =>
+    user?.role === 'user' ? 'dashboard' : 'home',
+  )
 
   const handleLogin = (session: UserSession) => {
     localStorage.setItem(SESSION_KEY, JSON.stringify(session))
     setUser(session)
+    setView(session.role === 'user' ? 'dashboard' : 'home')
   }
 
   const handleLogout = () => {
     localStorage.removeItem(SESSION_KEY)
-    setShowFitness(false)
+    setView('home')
     setUser(null)
   }
 
@@ -46,11 +50,23 @@ function App() {
 
   return (
     <>
-      {
-        showFitness
-          ? <FitnessView user={user} onBack={() => setShowFitness(false)} onLogout={handleLogout} />
-          : <HomeView user={user} onStart={() => setShowFitness(true)} onLogout={handleLogout} />
-      }
+      {view === 'fitness' ? (
+        <FitnessView user={user} onBack={() => setView('home')} onLogout={handleLogout} />
+      ) : view === 'dashboard' ? (
+        <DashboardView
+          user={user}
+          onBack={() => setView('home')}
+          onBuildPlan={() => setView('fitness')}
+          onLogout={handleLogout}
+        />
+      ) : (
+        <HomeView
+          user={user}
+          onStart={() => setView('fitness')}
+          onDashboard={() => setView('dashboard')}
+          onLogout={handleLogout}
+        />
+      )}
     </>
   )
 }

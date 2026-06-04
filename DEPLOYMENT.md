@@ -22,9 +22,10 @@ Set admin credentials in Vercel environment variables:
 ```text
 ADMIN_EMAIL=your-admin@example.com
 ADMIN_PASSWORD=your-strong-password
+DATABASE_URL=mysql+pymysql://user:password@host:3306/ai_fitness_coach
 ```
 
-The included JSON datastore is useful for local/demo use. On Vercel it writes to `/tmp/ai-fitness-store.json`, which allows user login to work but can reset between serverless instances or deployments. Use a real hosted database if you need permanent user and plan storage in production.
+Use a hosted MySQL database for `DATABASE_URL`. SQLAlchemy creates the app tables automatically on the first API request.
 
 ## Netlify
 
@@ -54,6 +55,8 @@ VITE_API_URL=https://your-vercel-app.vercel.app/api
 Backend:
 
 ```bash
+mysql -u root -p < backend/schema.sql
+set DATABASE_URL=mysql+pymysql://root:your-password@127.0.0.1:3306/ai_fitness_coach
 cd backend
 .venv\Scripts\python.exe -m uvicorn model_api:app --reload --host 127.0.0.1 --port 8000
 ```
