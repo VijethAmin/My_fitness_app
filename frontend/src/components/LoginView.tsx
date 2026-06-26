@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { API_URL } from '../api'
 
 export type UserSession = {
   id: string
@@ -70,10 +71,14 @@ function LoginView({ onLogin }: Props) {
       onLogin(session)
     } catch (loginError) {
       console.error(loginError)
+      const isNetworkError =
+        loginError instanceof TypeError && loginError.message.toLowerCase().includes('failed to fetch')
       setError(
         role === 'admin'
           ? 'Admin login failed. Default admin is admin@fitness.local / admin123.'
-          : loginError instanceof Error
+          : isNetworkError
+            ? 'Could not reach the backend. Start FastAPI on port 8000 and try again.'
+            : loginError instanceof Error
             ? loginError.message
             : 'Could not complete your request. Try again.',
       )
@@ -179,8 +184,5 @@ function LoginView({ onLogin }: Props) {
     </main>
   )
 }
-
-const API_URL =
-  import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://127.0.0.1:8000' : '/api')
 
 export default LoginView

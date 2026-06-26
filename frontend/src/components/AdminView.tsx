@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { API_URL } from '../api'
 import type { UserSession } from './LoginView'
 
 type WorkoutPlan = Record<
@@ -38,9 +39,6 @@ type Analytics = {
   workout_preference: Record<string, number>
   diet_preference: Record<string, number>
 }
-
-const API_URL =
-  import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://127.0.0.1:8000' : '/api')
 
 const EMPTY_WORKOUT_PLAN: WorkoutPlan = {
   Monday: {

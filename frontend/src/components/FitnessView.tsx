@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { API_URL } from '../api'
 import type { UserSession } from './LoginView'
 
 type Props = {
@@ -29,9 +30,6 @@ type ProgressUpdate = {
   total_workouts: number
   completion_rate: number
 }
-
-const API_URL =
-  import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://127.0.0.1:8000' : '/api')
 
 const GOALS: { value: Goal; copy: string }[] = [
   { value: 'Muscle Gain', copy: 'Hypertrophy focused calorie surplus with higher daily protein.' },

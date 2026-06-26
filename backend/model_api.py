@@ -1,7 +1,11 @@
 import copy
 import hashlib
+import json
+import logging
 import os
 import secrets
+import urllib.error
+import urllib.request
 import uuid
 from datetime import datetime, timezone
 from typing import Literal, TypedDict
@@ -32,11 +36,7 @@ app = FastAPI(title="AI Fitness Coach API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
-    allow_origin_regex=r"https://.*\.(vercel|netlify)\.app",
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$|^https://.*\.(vercel|netlify)\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -49,8 +49,28 @@ WorkoutPlace = Literal["Gym", "Home"]
 Role = Literal["admin", "user"]
 Gender = Literal["Male", "Female"]
 
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@fitness.local").lower()
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+logger = logging.getLogger(__name__)
+
+DEFAULT_ADMIN_EMAIL = "admin@fitness.local"
+DEFAULT_ADMIN_PASSWORD = "admin123"
+PRODUCTION_ENV = (
+    os.getenv("ENVIRONMENT", "").lower() == "production"
+    or os.getenv("VERCEL_ENV", "").lower() == "production"
+    or os.getenv("NETLIFY_ENV", "").lower() == "production"
+)
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "").strip().lower() or DEFAULT_ADMIN_EMAIL
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "") or DEFAULT_ADMIN_PASSWORD
+
+if PRODUCTION_ENV and (os.getenv("ADMIN_EMAIL") is None or os.getenv("ADMIN_PASSWORD") is None):
+    raise RuntimeError(
+        "ADMIN_EMAIL and ADMIN_PASSWORD must be explicitly set in production environments."
+    )
+
+if not PRODUCTION_ENV and (ADMIN_EMAIL == DEFAULT_ADMIN_EMAIL or ADMIN_PASSWORD == DEFAULT_ADMIN_PASSWORD):
+    logger.warning(
+        "Using default admin credentials in non-production mode. "
+        "Set ADMIN_EMAIL and ADMIN_PASSWORD before deployment."
+    )
 
 
 class FitnessInput(BaseModel):
@@ -91,6 +111,10 @@ class AdminPlanUpdate(BaseModel):
 class WorkoutCompletionInput(BaseModel):
     day: str = Field(..., min_length=3, max_length=20)
     completed: bool
+
+
+class CoachInput(BaseModel):
+    question: str = Field(default="", max_length=400)
 
 
 class WorkoutDay(TypedDict):
@@ -411,6 +435,126 @@ def build_notes(user: FitnessInput, bmi: float) -> list[str]:
     return notes
 
 
+def summarize_plan_for_ai(plan: dict[str, object]) -> dict[str, object]:
+    return {
+        "bmi": plan.get("BMI"),
+        "bmi_category": plan.get("BMI Category"),
+        "daily_calories": plan.get("Daily Calories"),
+        "protein": plan.get("Protein"),
+        "water_intake": plan.get("Water Intake"),
+        "workout_plan": plan.get("Workout Plan", {}),
+        "meal_plan": plan.get("Meal Plan", {}),
+        "notes": plan.get("Notes", []),
+    }
+
+
+def build_local_coach_message(
+    user: dict[str, object],
+    plan: dict[str, object],
+    completions: dict[str, bool],
+    question: str,
+) -> str:
+    workout_plan = plan.get("Workout Plan", {})
+    days = list(workout_plan.keys()) if isinstance(workout_plan, dict) else []
+    pending_days = [day for day in days if not completions.get(day)]
+    completed_count = sum(1 for completed in completions.values() if completed)
+    total_workouts = len(days)
+    completion_rate = round(completed_count / total_workouts * 100) if total_workouts else 0
+    next_day = pending_days[0] if pending_days else "your next planned training day"
+    next_workout = workout_plan.get(next_day, {}) if isinstance(workout_plan, dict) else {}
+    focus = next_workout.get("focus", "planned workout") if isinstance(next_workout, dict) else "planned workout"
+    exercises = next_workout.get("exercises", []) if isinstance(next_workout, dict) else []
+    first_exercises = ", ".join(str(exercise) for exercise in exercises[:3]) or "your main exercises"
+    protein = plan.get("Protein", "your")
+    water = plan.get("Water Intake", "your")
+
+    context_line = f"About your question: {question.strip()} " if question.strip() else ""
+    return (
+        f"{context_line}You are at {completion_rate}% weekly completion "
+        f"({completed_count}/{total_workouts}). Prioritize {next_day}: {focus}. "
+        f"Start with {first_exercises}, keep the first set easy, and stop if pain feels sharp. "
+        f"For recovery, aim for about {protein}g protein and {water}L water today. "
+        "If you feel low on energy, reduce one set per exercise instead of skipping the session."
+    )
+
+
+def read_response_text(payload: dict[str, object]) -> str:
+    output_text = payload.get("output_text")
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text.strip()
+
+    output = payload.get("output")
+    if not isinstance(output, list):
+        return ""
+
+    parts: list[str] = []
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        for content_item in content:
+            if not isinstance(content_item, dict):
+                continue
+            text = content_item.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+    return "\n".join(parts).strip()
+
+
+def generate_ai_coach_message(
+    user: dict[str, object],
+    plan: dict[str, object],
+    completions: dict[str, bool],
+    question: str,
+) -> tuple[str, str]:
+    fallback_message = build_local_coach_message(user, plan, completions, question)
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return fallback_message, "local"
+
+    prompt_payload = {
+        "user_name": user.get("name"),
+        "profile": user.get("profile"),
+        "plan": summarize_plan_for_ai(plan),
+        "completed_workouts": completions,
+        "question": question.strip() or "Give me today's most useful coaching advice.",
+    }
+    request_body = {
+        "model": os.getenv("OPENAI_MODEL", "gpt-5.4-mini"),
+        "store": False,
+        "instructions": (
+            "You are a practical fitness coach. Give concise, safe, non-medical guidance. "
+            "Use the user's saved plan and progress. Do not diagnose medical issues. "
+            "If pain, dizziness, pregnancy, injury, or a medical condition is mentioned, "
+            "recommend consulting a qualified professional."
+        ),
+        "input": (
+            "Create a brief coaching note in 4-6 sentences. Include one workout priority, "
+            "one nutrition or hydration reminder, and one adjustment based on completion progress.\n\n"
+            f"{json.dumps(prompt_payload, ensure_ascii=False)}"
+        ),
+    }
+
+    try:
+        request = urllib.request.Request(
+            "https://api.openai.com/v1/responses",
+            data=json.dumps(request_body).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=25) as response:
+            response_payload = json.loads(response.read().decode("utf-8"))
+            message = read_response_text(response_payload)
+            return (message or fallback_message), "openai"
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError):
+        return fallback_message, "local"
+
+
 @app.get("/")
 def home() -> dict[str, str]:
     return {"message": "AI Fitness Coach backend is running"}
@@ -641,6 +785,35 @@ def update_user_progress(user_id: str, update: WorkoutCompletionInput) -> dict[s
         "completed_workouts": completed_count,
         "total_workouts": len(days),
         "completion_rate": round(completed_count / len(days) * 100) if days else 0,
+    }
+
+
+@app.post("/users/{user_id}/ai_coach")
+@app.post("/api/users/{user_id}/ai_coach")
+def get_ai_coach_tip(user_id: str, coach_input: CoachInput) -> dict[str, object]:
+    store = load_store()
+    user = find_user_by_id(get_users(store), user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    plan = user.get("latest_plan")
+    if not isinstance(plan, dict):
+        raise HTTPException(status_code=400, detail="Generate a fitness plan before using AI coach.")
+
+    workout_plan = plan.get("Workout Plan", {})
+    days = workout_plan.keys() if isinstance(workout_plan, dict) else []
+    completions = {
+        day: completed
+        for day, completed in get_workout_completions(user_id).items()
+        if day in days
+    }
+    completed_count = sum(1 for completed in completions.values() if completed)
+    total_workouts = len(list(days))
+    message, source = generate_ai_coach_message(user, plan, completions, coach_input.question)
+    return {
+        "message": message,
+        "source": source,
+        "completion_rate": round(completed_count / total_workouts * 100) if total_workouts else 0,
     }
 
 

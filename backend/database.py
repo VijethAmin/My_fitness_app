@@ -1,17 +1,19 @@
 import json
 import logging
 import os
+import shutil
 import tempfile
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, create_engine, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, String, UniqueConstraint, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_SQLITE_PATH = os.path.join(os.path.dirname(__file__), "ai_fitness.db")
 FALLBACK_SQLITE_PATH = os.path.join(tempfile.gettempdir(), "ai_fitness.db")
+SQLITE_HEADER = b"SQLite format 3\x00"
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
@@ -39,6 +41,31 @@ def _is_path_writable(path: str) -> bool:
         return False
 
 
+def _is_valid_sqlite_file(path: str) -> bool:
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        return True
+
+    try:
+        with open(path, "rb") as database_file:
+            return database_file.read(len(SQLITE_HEADER)) == SQLITE_HEADER
+    except OSError:
+        return False
+
+
+def _move_invalid_sqlite_file(path: str) -> None:
+    if _is_valid_sqlite_file(path):
+        return
+
+    backup_path = f"{path}.invalid"
+    counter = 1
+    while os.path.exists(backup_path):
+        backup_path = f"{path}.invalid.{counter}"
+        counter += 1
+
+    logger.warning("Invalid SQLite database at %s; moving it to %s.", path, backup_path)
+    shutil.move(path, backup_path)
+
+
 def _sqlite_engine() -> tuple[object, str]:
     candidate = DEFAULT_SQLITE_PATH
     if not _is_path_writable(candidate):
@@ -48,6 +75,8 @@ def _sqlite_engine() -> tuple[object, str]:
             FALLBACK_SQLITE_PATH,
         )
         candidate = FALLBACK_SQLITE_PATH
+
+    _move_invalid_sqlite_file(candidate)
 
     url = f"sqlite:///{candidate}"
     return _create_engine(url), url
@@ -90,9 +119,9 @@ class UserRecord(Base):
     password_hash: Mapped[str] = mapped_column(String(100))
     created_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
     last_login: Mapped[str | None] = mapped_column(String(40), nullable=True)
-    profile_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    latest_plan_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    custom_plan_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    profile_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    latest_plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    custom_plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class WorkoutCompletionRecord(Base):
@@ -110,12 +139,12 @@ def initialize_database() -> None:
     Base.metadata.create_all(bind=engine)
 
 
-def _decode(value: str | None) -> Any:
-    return json.loads(value) if value else None
-
-
-def _encode(value: Any) -> str | None:
-    return json.dumps(value) if value is not None else None
+def _decode(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
 
 
 def _public_dict(record: UserRecord) -> dict[str, object]:
@@ -166,9 +195,9 @@ def save_store(store: dict[str, object]) -> None:
             record.password_hash = str(user["password_hash"])
             record.created_at = str(user["created_at"]) if user.get("created_at") else None
             record.last_login = str(user["last_login"]) if user.get("last_login") else None
-            record.profile_json = _encode(user.get("profile"))
-            record.latest_plan_json = _encode(user.get("latest_plan"))
-            record.custom_plan_json = _encode(user.get("custom_plan"))
+            record.profile_json = user.get("profile")
+            record.latest_plan_json = user.get("latest_plan")
+            record.custom_plan_json = user.get("custom_plan")
 
 
 def get_workout_completions(user_id: str) -> dict[str, bool]:
